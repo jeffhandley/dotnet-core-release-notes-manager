@@ -110,27 +110,37 @@ else
 fi
 echo "::endgroup::"
 
-# ---- 3b. api-diff (best-effort) --------------------------------------------
+# ---- 3b. api-diff (best-effort, conditional, time-bounded) -----------------
 # Generate the before/after public-API diff for this milestone into
 # CONTENT_ROOT/<major>/.../api-diff/ so the agent can stage it onto the features
-# branch. Best-effort, because the head milestone's ref packs may not be
-# published on the public feed yet (same timing caveat as build-metadata).
+# branch. This is expensive (downloads ref packs + diffs every assembly), so it
+# runs only when the milestone does not already have an api-diff on its features
+# branch (set FORCE_API_DIFF=1 to regenerate). It is time-bounded and best-effort
+# so it never blocks or hangs the run; the head milestone's ref packs may also
+# not be published on the feed yet (same timing caveat as build-metadata).
 cur_label="$milestone_dotted"
 prev_label="$(printf '%s' "$last_shipped" | grep -oE '(preview|rc)\.[0-9]+' | head -1 || true)"
 prev_mm="$(printf '%s' "$last_shipped" | grep -oE '^[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$prev_mm" ] || prev_mm="$major"
-if command -v pwsh >/dev/null 2>&1 && [ -f "${CONTENT_ROOT}/RunApiDiff.ps1" ]; then
+skip_api_diff=0
+if [ "${FORCE_API_DIFF:-0}" != "1" ] \
+   && git fetch --no-tags --depth=1 origin "$base_branch" >/dev/null 2>&1 \
+   && git ls-tree -d "origin/${base_branch}" "${content_dir}/api-diff" 2>/dev/null | grep -q .; then
+  echo "::notice::api-diff already present on ${base_branch}; skipping regeneration (set FORCE_API_DIFF=1 to override)."
+  skip_api_diff=1
+fi
+if [ "$skip_api_diff" = "0" ] && command -v pwsh >/dev/null 2>&1 && [ -f "${CONTENT_ROOT}/RunApiDiff.ps1" ]; then
   echo "::group::api-diff ($prev_mm ${prev_label:-ga} -> $major ${cur_label:-ga})"
-  if pwsh "${CONTENT_ROOT}/RunApiDiff.ps1" \
+  if timeout "${API_DIFF_TIMEOUT:-1500}" pwsh "${CONTENT_ROOT}/RunApiDiff.ps1" \
        -PreviousMajorMinor "$prev_mm" ${prev_label:+-PreviousPrereleaseLabel "$prev_label"} \
        -CurrentMajorMinor "$major" ${cur_label:+-CurrentPrereleaseLabel "$cur_label"} \
        -CoreRepo "$(pwd)" -InstallApiDiff; then
     echo "api-diff generated under ${content_dir}/api-diff/."
   else
-    echo "::warning::api-diff generation failed (best-effort) — most likely the head milestone's ref packs are not published on the feed yet; the agent should leave any existing api-diff in place and note it as pending."
+    echo "::warning::api-diff generation failed or timed out (best-effort) — likely the head milestone's ref packs are not published yet, or the diff exceeded the time budget; the agent should leave any existing api-diff in place and note it as pending."
   fi
   echo "::endgroup::"
-else
+elif [ "$skip_api_diff" = "0" ]; then
   echo "::notice::pwsh or ${CONTENT_ROOT}/RunApiDiff.ps1 not available; skipping api-diff."
 fi
 
