@@ -20,6 +20,8 @@
 #   $AGENT_DIR/components.json            copy of the components source of truth
 #   $AGENT_DIR/release-notes-branches.txt snapshot of existing release-notes/*
 #   $AGENT_DIR/release-notes-prs.json + pr-comments/*  this target's PR context
+#   $AGENT_DIR/context-index.json        index of the preloaded context files
+#                                        (the agent body reads this first)
 #
 # Requires `release-notes`, `git`, `gh`, and `jq` on PATH.
 #
@@ -55,7 +57,7 @@ slug="${base_branch#release-notes/}"
 gen_dir="${AGENT_DIR}/generated/${slug}"
 gen_changes="${gen_dir}/changes.json"
 gen_build_metadata="${gen_dir}/build-metadata.json"
-mkdir -p "$gen_dir" "$AGENT_DIR/pr-comments"
+mkdir -p "$gen_dir" "$AGENT_DIR/pr-comments" "$AGENT_DIR/publish"
 
 # ---- 1. VMR clone ----------------------------------------------------------
 if [ ! -d "$VMR_PATH/.git" ]; then
@@ -172,6 +174,23 @@ else
   echo "[]" > "${AGENT_DIR}/release-notes-prs.json"
   echo "::notice::GH_TOKEN not set — skipping PR-context preload."
 fi
+
+# ---- 6. Context index (the body reads this first; it is a required prerequisite) ----
+jq -n \
+  --arg prs "$AGENT_DIR/release-notes-prs.json" \
+  --arg branches "$AGENT_DIR/release-notes-branches.txt" \
+  --arg comment_dir "$AGENT_DIR/pr-comments" \
+  --arg publish_dir "$AGENT_DIR/publish" \
+  --arg target "$AGENT_DIR/target.json" \
+  --arg components "$AGENT_DIR/components.json" \
+  '{
+    release_notes_prs: $prs,
+    release_notes_branches: $branches,
+    pr_comment_directory: $comment_dir,
+    publish_directory: $publish_dir,
+    target: $target,
+    components: $components
+  }' > "$AGENT_DIR/context-index.json"
 
 echo "Producer preload complete for ${base_branch}:"
 jq -c '.[0] | {branch_features, vmr_base_tag, vmr_head_ref}' "$AGENT_DIR/target.json"

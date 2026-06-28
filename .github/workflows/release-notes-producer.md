@@ -666,7 +666,7 @@ The structure is a JSON array of targets, typically a single entry:
     "milestone_branch_label": "preview-3",
     "last_shipped": "11.0.0-preview.2",
     "support_phase": "preview",
-    "branch_features": "release-notes/dotnet-11-preview-3-features",
+    "branch_features": "release-notes/11.0-preview.3",
     "content_dir": "release-notes/11.0/preview/preview3",
     "vmr_base_tag": "v11.0.0-preview.2.26159.112",
     "vmr_head_ref": "release/11.0.1xx-preview3",
@@ -698,8 +698,8 @@ The preload step lists every branch matching `release-notes/*` in `/tmp/gh-aw/ag
 
 Process targets in array order. Each target has its own family of long-lived branches and PRs for the lifetime of that release draft:
 
-- **Features branch** — `target.branch_features` (e.g. `release-notes/dotnet-11-preview-5-features`). Holds the **shared data** for the milestone: `changes.json`, `features.json`, `README.md`, and any other non-component metadata (e.g. `build-metadata.json`, `release.json`) that lives in `content_dir`. **Never write per-component `.md` files to this branch.**
-- **Component branches** — one branch per component that has noteworthy features in this milestone, named `<target.branch_features>-<component-id>` (e.g. `release-notes/dotnet-11-preview-5-features-runtime`, `…-aspnetcore`). Each component branch contains **only that component's `.md` file** inside `content_dir`. Components with no noteworthy features do **not** get a branch and do **not** get a stub `.md` — skip them entirely.
+- **Features branch** — `target.branch_features` (e.g. `release-notes/11.0-preview.5`). Holds the **shared data** for the milestone: `changes.json`, `features.json`, `README.md`, and any other non-component metadata (e.g. `build-metadata.json`, `release.json`) that lives in `content_dir`. **Never write per-component `.md` files to this branch.**
+- **Component branches** — one branch per component that has noteworthy features in this milestone, named `<target.branch_features>-<component-id>` (e.g. `release-notes/11.0-preview.5-runtime`, `…-aspnetcore`). Each component branch contains **only that component's `.md` file** inside `content_dir`. Components with no noteworthy features do **not** get a branch and do **not** get a stub `.md` — skip them entirely.
 
 Component IDs come from `release-notes/components.json` (the `id` field of each component, which matches the markdown file stem, e.g. `runtime` → `runtime.md`). Use `jq -r '.components[].id' /tmp/gh-aw/agent/components.json` to enumerate them. The repo lists in that file define ownership boundaries: do not route a PR from one component's repo into another component just because the topic is adjacent. In particular, `dotnet/roslyn` belongs to `csharp` (`csharp.md` / `<branch_features>-csharp`), not `sdk`; do not duplicate C# language content in `sdk.md`.
 
@@ -1062,11 +1062,11 @@ PR bodies:
 - Features branch body: summarize the target milestone, number of changes, which component branches were created/updated, and any open questions or items needing human review.
 - Component branch body: summarize what changed in that component this milestone — number of features written, notable additions, and any open questions for that team. Link back to the features-branch PR.
 
-Manifest examples (target features branch `release-notes/dotnet-11-preview-5-features`):
+Manifest examples (target features branch `release-notes/11.0-preview.5`):
 
 ```json
 {
-  "branch": "release-notes/dotnet-11-preview-5-features",
+  "branch": "release-notes/11.0-preview.5",
   "title": "[release-notes] .NET 11 Preview 5",
   "body": "Draft release notes data for .NET 11 Preview 5.\n\n- changes.json generated from v11.0.0-preview.4.26230.115 to main\n- features.json scored for 87 changes\n- Component branches opened: runtime, aspnetcore, sdk\n- Open question: benchmark data still needed for the JIT section (see runtime PR)",
   "comment": "Refreshed changes.json and features.json scores."
@@ -1075,7 +1075,7 @@ Manifest examples (target features branch `release-notes/dotnet-11-preview-5-fea
 
 ```json
 {
-  "branch": "release-notes/dotnet-11-preview-5-features-runtime",
+  "branch": "release-notes/11.0-preview.5-runtime",
   "title": "[release-notes] .NET 11 Preview 5 — .NET Runtime",
   "body": "Draft Runtime release notes for .NET 11 Preview 5.\n\n- 12 features written across GC, JIT, and diagnostics\n- See companion features PR for changes.json/features.json\n- Open question: benchmark data still needed for the new loop-unrolling optimization",
   "comment": "Added two new JIT features and refreshed the GC section."
