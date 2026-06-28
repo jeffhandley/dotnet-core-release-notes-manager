@@ -1,0 +1,91 @@
+name: Release Notes Manager
+
+# Orchestration only: discover the in-scope release targets and dispatch one
+# Release Notes Producer run per target. Deterministic (no agent), so this is a
+# plain workflow rather than an agentic gh-aw workflow. workflow_dispatch is an
+# exception to GITHUB_TOKEN recursion-prevention, so GITHUB_TOKEN + actions:write
+# is sufficient to fan out to the producer.
+
+on:
+  schedule:
+    - cron: "29 15 * * *" # daily, ~08:29 PT
+  workflow_dispatch:
+    inputs:
+      milestone:
+        description: "Optional milestone override for feature targets (e.g. rc1, ga). Empty = auto-derive."
+        required: false
+        type: string
+      dry_run:
+        description: "Compute and print targets without dispatching producers."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-notes-manager
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover targets
+    if: ${{ !github.event.repository.fork || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.discover.outputs.targets }}
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Compute in-scope targets
+        id: discover
+        env:
+          MILESTONE: ${{ inputs.milestone }}
+        run: |
+          set -euo pipefail
+          targets="$(bash .github/scripts/release-notes-discover.sh)"
+          count="$(jq 'length' <<<"$targets")"
+          echo "Discovered ${count} target(s):"
+          jq '.' <<<"$targets"
+          # Emit compact JSON for the dispatch matrix.
+          {
+            echo "targets<<__EOF__"
+            jq -c '.' <<<"$targets"
+            echo "__EOF__"
+            echo "count=${count}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Discovered targets (${count})"
+            echo '```json'
+            jq '.' <<<"$targets"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dispatch:
+    name: Dispatch producer
+    needs: discover
+    if: ${{ needs.discover.outputs.count != '0' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.discover.outputs.targets) }}
+    steps:
+      - name: Dispatch Release Notes Producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ toJSON(matrix.target) }}
+          MILESTONE: ${{ inputs.milestone }}
+        run: |
+          set -euo pipefail
+          label="$(jq -r '.base_branch // .mode' <<<"$TARGET")"
+          echo "Dispatching producer for: ${label}"
+          gh workflow run release-notes-producer.lock.yml \
+            --ref "${GITHUB_REF_NAME}" \
+            -f target="$(jq -c '.' <<<"$TARGET")" \
+            ${MILESTONE:+-f milestone="$MILESTONE"}
