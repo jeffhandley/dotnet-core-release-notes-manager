@@ -63,7 +63,37 @@ outer: foreach (var row in grid)
 }
 ```
 
-Labels follow the same scoping rules as existing C# labels and are only valid on loop statements (`for`, `foreach`, `while`, `do`). The parser and binder support is now complete; semantic analysis and IL emit are expected in a later preview.
+Labels follow the same scoping rules as existing C# labels and are only valid on loop statements (`for`, `foreach`, `while`, `do`). Preview 6 completes the core implementation: binding, lowering, IL emit, and semantic model are now all in place ([dotnet/roslyn #83198](https://github.com/dotnet/roslyn/pull/83198)).
+
+### Analyzer and fixer: prefer labeled `break`/`continue` over `goto` and flag variables
+
+A new Roslyn analyzer detects patterns where a labeled `break` or `continue` can replace a `goto`-based loop-exit or a boolean flag variable, and offers a code fix to apply the rewrite automatically ([dotnet/roslyn #84170](https://github.com/dotnet/roslyn/pull/84170)). For example:
+
+```csharp
+// Before: using a flag variable
+bool found = false;
+foreach (var row in grid)
+{
+    foreach (var cell in row)
+    {
+        if (cell.HasError) { found = true; break; }
+        Process(cell);
+    }
+    if (found) break;
+}
+
+// After: labeled break (applied by the fixer)
+outer: foreach (var row in grid)
+{
+    foreach (var cell in row)
+    {
+        if (cell.HasError) break outer;
+        Process(cell);
+    }
+}
+```
+
+The analyzer runs in IDEs and during `dotnet build`, surfacing suggestions for both `goto`-based exits and flag-variable patterns.
 
 ## `RegisterPreCompilationSourceOutput` for incremental generators
 
