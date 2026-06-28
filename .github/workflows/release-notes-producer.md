@@ -76,6 +76,7 @@ steps:
     env:
       TARGET: ${{ inputs.target }}
       GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
     run: |
       set -euo pipefail
       chmod +x /tmp/release-notes-gen-tool/release-notes
