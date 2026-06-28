@@ -20,6 +20,10 @@ on:
         required: false
         type: boolean
         default: false
+  # Reactive: when a human submits a review on a draft release-notes PR, re-run
+  # the producer for just that milestone so feedback is incorporated promptly.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
@@ -86,7 +90,7 @@ jobs:
   produce:
     name: Produce release notes
     needs: discover
-    if: ${{ needs.discover.outputs.feature_count != '0' && !inputs.dry_run }}
+    if: ${{ github.event_name != 'pull_request_review' && needs.discover.outputs.feature_count != '0' && !inputs.dry_run }}
     permissions:
       contents: write
       pull-requests: write
@@ -111,7 +115,7 @@ jobs:
   produce_servicing:
     name: Produce servicing release notes
     needs: discover
-    if: ${{ needs.discover.outputs.has_servicing == 'true' && !inputs.dry_run }}
+    if: ${{ github.event_name != 'pull_request_review' && needs.discover.outputs.has_servicing == 'true' && !inputs.dry_run }}
     permissions:
       contents: write
       pull-requests: write
@@ -124,4 +128,77 @@ jobs:
     uses: ./.github/workflows/release-notes-servicing-producer.lock.yml
     with:
       target: ${{ needs.discover.outputs.servicing_target }}
+    secrets: inherit
+
+  # ---- Reactive path (pull_request_review) ----------------------------------
+  reactive_resolve:
+    name: Resolve reviewed PR to a target
+    needs: discover
+    if: >-
+      github.event_name == 'pull_request_review' &&
+      github.event.pull_request.draft &&
+      startsWith(github.event.pull_request.title, '[release-notes]') &&
+      startsWith(github.event.pull_request.head.ref, 'release-notes/')
+    runs-on: ubuntu-latest
+    outputs:
+      feature_target: ${{ steps.resolve.outputs.feature_target }}
+      servicing_target: ${{ steps.resolve.outputs.servicing_target }}
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      TARGETS: ${{ needs.discover.outputs.targets }}
+    steps:
+      - name: Match the reviewed PR head to an in-scope target
+        id: resolve
+        run: |
+          set -euo pipefail
+          echo "Reviewed PR head branch: $HEAD_REF"
+          feature_target=""
+          servicing_target=""
+          if [ "$HEAD_REF" = "release-notes/servicing" ]; then
+            servicing_target="$(jq -c 'map(select(.mode == "servicing")) | .[0] // empty' <<<"$TARGETS")"
+          else
+            # The PR head is either the milestone features branch or a
+            # <features-branch>-<component> branch; match the feature target whose
+            # base_branch equals the head ref or is its prefix.
+            feature_target="$(jq -c --arg h "$HEAD_REF" '
+              map(select(.mode == "feature"))
+              | map(select(.base_branch == $h or ($h | startswith(.base_branch + "-"))))
+              | .[0] // empty' <<<"$TARGETS")"
+          fi
+          {
+            echo "feature_target<<__EOF__"; printf '%s\n' "${feature_target:-}"; echo "__EOF__"
+            echo "servicing_target<<__EOF__"; printf '%s\n' "${servicing_target:-}"; echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+          if [ -z "$feature_target" ] && [ -z "$servicing_target" ]; then
+            echo "::notice::Reviewed PR did not match an in-scope target; nothing to do."
+          fi
+
+  reactive_feature:
+    name: Reactive produce (feature)
+    needs: reactive_resolve
+    if: ${{ needs.reactive_resolve.outputs.feature_target != '' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      packages: read
+    uses: ./.github/workflows/release-notes-producer.lock.yml
+    with:
+      target: ${{ needs.reactive_resolve.outputs.feature_target }}
+    secrets: inherit
+
+  reactive_servicing:
+    name: Reactive produce (servicing)
+    needs: reactive_resolve
+    if: ${{ needs.reactive_resolve.outputs.servicing_target != '' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      packages: read
+    uses: ./.github/workflows/release-notes-servicing-producer.lock.yml
+    with:
+      target: ${{ needs.reactive_resolve.outputs.servicing_target }}
     secrets: inherit
