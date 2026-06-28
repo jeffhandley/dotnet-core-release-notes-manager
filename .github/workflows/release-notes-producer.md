@@ -15,20 +15,6 @@ network:
     - defaults
     - dotnet
 safe-outputs:
-  create-pull-request:
-    title-prefix: "[release-notes] "
-    labels: [area-release-notes, automation]
-    draft: true
-    # One umbrella features branch plus one branch per component that has
-    # noteworthy features (components.json lists 11). 10 is the gh-aw schema
-    # ceiling and covers the realistic per-target branch count with headroom.
-    max: 10
-  push-to-pull-request-branch:
-    required-title-prefix: "[release-notes] "
-    required-labels: [area-release-notes, automation]
-    # Matches create-pull-request: later runs push updates to the same
-    # umbrella + per-component branch family.
-    max: 10
   add-comment:
     max: 20
     target: "*"
@@ -85,24 +71,24 @@ steps:
       bash .github/scripts/release-notes-producer-preload.sh
 
 post-steps:
-  - name: Translate publish manifests to safe outputs
-    env:
-      GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
+  - name: Translate publish manifests to publish-items.json
     run: |
       set -euo pipefail
       manifest_dir=/tmp/gh-aw/agent/publish
       prs_json=/tmp/gh-aw/agent/release-notes-prs.json
-      output_file="${GH_AW_SAFE_OUTPUTS}"
-      agent_output_file=/tmp/gh-aw/agent_output.json
+      items_file=/tmp/gh-aw/agent/publish-items.json
 
-      mkdir -p /tmp/gh-aw
-      : > "$output_file"
+      mkdir -p /tmp/gh-aw/agent
 
-      # Reset agent_output.json to a known-empty shape. The gh-aw "Ingest agent
-      # output" step ran BEFORE this post-step and wrote {"items":[]} (because
-      # the agent uses publish-manifest indirection rather than calling
-      # safeoutputs MCP tools directly). We rebuild it here from the manifests.
-      echo '{"items":[]}' > "$agent_output_file"
+      # Build a standalone publish-items.json consumed by the
+      # publish_release_notes job. We deliberately do NOT touch the gh-aw
+      # safe-output files (outputs.jsonl / agent_output.json): outputs.jsonl is
+      # owned by the sandbox user (truncating it fails with permission denied)
+      # and agent_output.json is integrity-checked by gh-aw. PR/branch
+      # publishing is handled entirely by the custom publish_release_notes job;
+      # gh-aw native create-pull-request is intentionally not declared, so no
+      # competing hash-suffixed branches are created.
+      echo '{"items":[]}' > "$items_file"
 
       if [ ! -d "$manifest_dir" ]; then
         echo "No publish manifests were written"
@@ -117,17 +103,14 @@ post-steps:
       fi
 
       # append_item <json-object>
-      # Appends a JSON object to both the JSONL safe-outputs file (for audit
-      # parity with the in-band path) and to agent_output.json's .items array
-      # (which is what the downstream safe_outputs job actually consumes via
-      # the uploaded artifact).
+      # Appends a JSON object to publish-items.json's .items array, which the
+      # publish_release_notes job consumes from the uploaded agent artifact.
       append_item() {
         local item_json="$1"
-        printf '%s\n' "$item_json" >> "$output_file"
         local tmp
         tmp=$(mktemp)
-        jq --argjson item "$item_json" '.items += [$item]' "$agent_output_file" > "$tmp"
-        mv "$tmp" "$agent_output_file"
+        jq --argjson item "$item_json" '.items += [$item]' "$items_file" > "$tmp"
+        mv "$tmp" "$items_file"
       }
 
       for manifest in "${manifests[@]}"; do
@@ -262,7 +245,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: read
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -289,17 +272,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          agent_output=/tmp/gh-aw/agent_output.json
+          agent_output=/tmp/gh-aw/agent/publish-items.json
           if [ ! -f "$agent_output" ]; then
-            echo "::notice::No agent_output.json produced by the agent — nothing to publish"
+            echo "::notice::No publish-items.json produced by the agent post-step — nothing to publish"
             exit 0
           fi
           items_count=$(jq '.items | length' "$agent_output")
           if [ "$items_count" -eq 0 ]; then
-            echo "::notice::agent_output.json contained 0 items — nothing to publish"
+            echo "::notice::publish-items.json contained 0 items — nothing to publish"
             exit 0
           fi
-          echo "Publishing $items_count item(s) from agent_output.json"
+          echo "Publishing $items_count item(s) from publish-items.json"
 
           # Bundles produced by the agent post-step are uploaded with absolute
           # paths under /tmp/gh-aw/. The download artifact extracts them to
@@ -353,6 +336,7 @@ jobs:
                 title=$(jq -r '.title' <<<"$item")
                 bundle=$(jq -r '.bundle_path // empty' <<<"$item")
                 remote_only=$(jq -r '.remote_only // false' <<<"$item")
+                body=$(jq -r '.body // empty' <<<"$item")
                 echo "→ create_pull_request branch=$branch remote_only=$remote_only"
 
                 if [ "$remote_only" = "true" ]; then
@@ -424,8 +408,11 @@ jobs:
                   git push origin "refs/heads/$branch:refs/heads/$branch" --force-with-lease
                 fi
 
-                # If an open PR already exists, link to it; otherwise emit a
-                # compare URL so a human can open the PR with one click.
+                # If an open PR already exists for this branch, the push above
+                # updated it. Otherwise open a NEW draft PR on this exact
+                # branch. PRs are always created as drafts; a human flips them
+                # to Ready for Review to take over (the automation never merges
+                # and never marks Ready).
                 existing=$(gh pr list --head "$branch" --state open --json number,url --jq '.[0]')
                 if [ -n "$existing" ] && [ "$existing" != "null" ]; then
                   url=$(jq -r '.url' <<<"$existing")
@@ -433,11 +420,20 @@ jobs:
                   echo "::notice::Branch $branch updated; existing PR #$num: $url"
                   echo "- ✅ \`$branch\` — existing PR [#$num]($url) updated" >> "$summary"
                 else
-                  compare="${repo_url}/compare/main...$(printf '%s' "$branch" | sed 's,/,%2F,g')?expand=1"
-                  echo "::notice::Branch $branch pushed. Open PR: $compare"
-                  enc_title=$(printf '%s' "$title" | jq -sRr @uri)
-                  compare_titled="${compare}&title=${enc_title}"
-                  echo "- 🌱 \`$branch\` — [open a PR]($compare_titled)" >> "$summary"
+                  pr_body="${body:-Draft release notes for \`$branch\`.}"
+                  if pr_url=$(gh pr create --draft --base main --head "$branch" \
+                       --title "$title" --body "$pr_body" 2>&1); then
+                    echo "::notice::Opened draft PR for $branch: $pr_url"
+                    echo "- 🟢 \`$branch\` — opened draft PR $pr_url" >> "$summary"
+                  else
+                    # Fall back to a compare URL if PR creation is not permitted
+                    # (e.g. the repo setting "Allow GitHub Actions to create and
+                    # approve pull requests" is off). The branch is still pushed.
+                    echo "::warning::Could not open PR for $branch ($pr_url); emitting compare URL"
+                    compare="${repo_url}/compare/main...$(printf '%s' "$branch" | sed 's,/,%2F,g')?expand=1"
+                    enc_title=$(printf '%s' "$title" | jq -sRr @uri)
+                    echo "- 🌱 \`$branch\` — [open a PR](${compare}&title=${enc_title})" >> "$summary"
+                  fi
                 fi
                 ;;
               push_to_pull_request_branch)
@@ -495,10 +491,18 @@ jobs:
                 echo "- 🔁 \`$branch\` — pushed update to PR [#$pr_number]($pr_url)" >> "$summary"
                 ;;
               add_comment)
-                # Comments are skipped in the branches-only design — the
-                # human will see content via the PR they create.
+                # Post the update comment on the existing PR so each automated
+                # update is summarized for reviewers.
                 num=$(jq -r '.item_number' <<<"$item")
-                echo "→ add_comment item=$num (skipped — branches-only mode)"
+                cbody=$(jq -r '.body // empty' <<<"$item")
+                if [ -z "$num" ] || [ "$num" = "null" ] || [ -z "$cbody" ]; then
+                  echo "→ add_comment skipped (missing item_number or body)"
+                elif gh pr comment "$num" --body "$cbody" 2>&1; then
+                  echo "→ add_comment posted on PR #$num"
+                  echo "- 💬 commented on PR [#$num](${repo_url}/pull/$num)" >> "$summary"
+                else
+                  echo "::warning::Could not post comment on PR #$num"
+                fi
                 ;;
               *)
                 echo "::warning::Unknown agent_output item type: $type"
