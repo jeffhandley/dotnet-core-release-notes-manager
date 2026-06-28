@@ -94,6 +94,7 @@ jobs:
           fi
           echo "Dispatching producer for: ${label}"
           gh workflow run release-notes-producer.lock.yml \
+            --repo "$GITHUB_REPOSITORY" \
             --ref "${GITHUB_REF_NAME}" \
             -f target="$(jq -c '.' <<<"$TARGET")" \
             ${MILESTONE:+-f milestone="$MILESTONE"}
