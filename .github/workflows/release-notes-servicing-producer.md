@@ -673,6 +673,7 @@ Rules for the checklist (critical — get this right):
 - **Auto items** (`_(auto)_`) — set their `[x]`/`[ ]` state from what you actually did this run (e.g. check "Draft non-security notable changes" once you have drafted them; check "Incorporate PR review feedback" only if there was feedback and you addressed it).
 - **Human items** (`_(human)_`, `_(human / release tooling)_`) — when the PR already exists, **preserve their existing `[x]`/`[ ]` state exactly** from the current PR body; when first creating the PR, leave them unchecked. **Never toggle a human item yourself.**
 - Keep the item wording stable run-to-run so states map across runs. Put the checklist after the reference codefence in the body.
+- **Always render the complete checklist every run** — include every item even when a step is not yet applicable (leave those unchecked). Never drop an item; the checklist is a stable end-to-end process tracker.
 
 ### 3a. Read and respond to PR comments
 

@@ -1173,6 +1173,7 @@ Rules for the checklist (critical -- get this right):
 - **Auto items** (`_(auto)_`) -- set their `[x]`/`[ ]` state from what you actually did this run (e.g. check "Open/refresh component PRs" once the component branches exist; check "Incorporate PR review feedback" only when there was feedback and you addressed it; check "Final regeneration against the shipped tag" only once `vmr_head_ref` is a finalized tag).
 - **Human items** (`_(human)_`) -- when the PR already exists, **preserve their existing `[x]`/`[ ]` state exactly** from the current PR body; when first creating the PR, leave them unchecked. **Never toggle a human item yourself.**
 - Keep the item wording stable run-to-run so states map across runs.
+- **Always render the complete checklist every run** — include every item even when a step is not yet applicable (leave those unchecked). Never drop an item; the checklist is a stable end-to-end process tracker.
 
 Manifest examples (target features branch `release-notes/11.0-preview.5`):
 
