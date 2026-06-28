@@ -38,6 +38,8 @@ jobs:
       count: ${{ steps.discover.outputs.count }}
       feature_targets: ${{ steps.discover.outputs.feature_targets }}
       feature_count: ${{ steps.discover.outputs.feature_count }}
+      servicing_target: ${{ steps.discover.outputs.servicing_target }}
+      has_servicing: ${{ steps.discover.outputs.has_servicing }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,7 +55,11 @@ jobs:
           # until its producer path exists. Fan out over feature targets only.
           feature_targets="$(jq -c '[.[] | select(.mode == "feature")]' <<<"$targets")"
           feature_count="$(jq 'length' <<<"$feature_targets")"
-          echo "Discovered ${count} target(s); ${feature_count} feature target(s):"
+          # The consolidated servicing target (at most one) is produced by a
+          # separate servicing producer.
+          servicing_target="$(jq -c 'map(select(.mode == "servicing")) | .[0] // empty' <<<"$targets")"
+          if [ -n "$servicing_target" ]; then has_servicing=true; else has_servicing=false; fi
+          echo "Discovered ${count} target(s); ${feature_count} feature, servicing=${has_servicing}:"
           jq '.' <<<"$targets"
           # Emit compact JSON for the dispatch matrix.
           {
@@ -65,6 +71,10 @@ jobs:
             jq -c '.' <<<"$feature_targets"
             echo "__EOF__"
             echo "feature_count=${feature_count}"
+            echo "servicing_target<<__EOF__"
+            printf '%s\n' "${servicing_target:-}"
+            echo "__EOF__"
+            echo "has_servicing=${has_servicing}"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Discovered targets (${count}; ${feature_count} feature)"
@@ -96,4 +106,22 @@ jobs:
     with:
       target: ${{ toJSON(matrix.target) }}
       milestone: ${{ inputs.milestone }}
+    secrets: inherit
+
+  produce_servicing:
+    name: Produce servicing release notes
+    needs: discover
+    if: ${{ needs.discover.outputs.has_servicing == 'true' && !inputs.dry_run }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      packages: read
+    # One consolidated servicing target (all pending GA patches) -> the servicing
+    # producer, invoked as a reusable workflow (same actor-inheritance rationale
+    # as the feature producer above).
+    uses: ./.github/workflows/release-notes-servicing-producer.lock.yml
+    with:
+      target: ${{ needs.discover.outputs.servicing_target }}
     secrets: inherit
