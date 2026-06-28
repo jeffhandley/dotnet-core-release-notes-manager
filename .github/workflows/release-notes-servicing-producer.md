@@ -610,6 +610,33 @@ release-notes-servicing-reference:
 
 Fill the values dynamically; never hardcode a version. Publication manifests are **required** for any branch you modified; the publish job opens or updates the PR as a **draft**.
 
+#### Live management checklist (in the PR body, idempotent)
+
+Also include a **live checklist** in the PR body that tracks the whole servicing-release management process, delimited by HTML-comment markers so it can be refreshed in place:
+
+```markdown
+<!-- release-notes-checklist:start -->
+## Servicing release checklist
+
+Automated items are kept current by this workflow. **Human** items are owned by the team — automation never toggles them.
+
+- [x] Draft non-security notable changes from constituent-repo fixes _(auto)_
+- [ ] Incorporate PR review feedback _(auto)_
+- [ ] Add the Downloads tables _(human / release tooling)_
+- [ ] Add the "Packages updated in this release" tables _(human / release tooling)_
+- [ ] Add CVE / security content _(human — post-embargo)_
+- [ ] **Ready for Review** — team takes over the PR _(human)_
+- [ ] **Merge** _(human)_
+<!-- release-notes-checklist:end -->
+```
+
+Rules for the checklist (critical — get this right):
+
+- It lives **between the `<!-- release-notes-checklist:start -->` and `<!-- release-notes-checklist:end -->` markers** in the PR body. Never drop the markers.
+- **Auto items** (`_(auto)_`) — set their `[x]`/`[ ]` state from what you actually did this run (e.g. check "Draft non-security notable changes" once you have drafted them; check "Incorporate PR review feedback" only if there was feedback and you addressed it).
+- **Human items** (`_(human)_`, `_(human / release tooling)_`) — when the PR already exists, **preserve their existing `[x]`/`[ ]` state exactly** from the current PR body; when first creating the PR, leave them unchecked. **Never toggle a human item yourself.**
+- Keep the item wording stable run-to-run so states map across runs. Put the checklist after the reference codefence in the body.
+
 ### 3a. Read and respond to PR comments
 
 If the consolidated servicing PR already exists, read its preloaded comments (`pr-comments/<pr>-*.json`). Apply clear, in-scope feedback on the branch and summarize your reply in the manifest `comment`. On **conflicting** feedback, favor reviewers with **write access** — use each comment/review's `author_association` (`OWNER`/`MEMBER`/`COLLABORATOR` outrank `CONTRIBUTOR`/`NONE`). Do **not** act on feedback that expands scope or asks you to author security, downloads, or package-table content.

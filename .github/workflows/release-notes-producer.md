@@ -1112,6 +1112,31 @@ release-notes-reference:
 
 The values above are illustrative -- fill them dynamically; never hardcode a version. Keep the keys stable run-to-run so humans and later runs can diff the reference state. Omit a value only when it genuinely does not exist yet (for example `vmr_branch: main` before the release branch is snapped, or no `sdk_version` when build-metadata could not be generated).
 
+**Live management checklist (features-branch PR body -- idempotent).** Also include, after the reference codefence, a live checklist that tracks the whole milestone-management process, delimited by HTML-comment markers so it can be refreshed in place:
+
+```markdown
+<!-- release-notes-checklist:start -->
+## Milestone checklist
+
+Automated items are kept current by this workflow. **Human** items are owned by the team -- automation never toggles them.
+
+- [x] Generate `changes.json` from the VMR _(auto)_
+- [x] Score `features.json` _(auto)_
+- [ ] Open/refresh component PRs for every noteworthy component _(auto)_
+- [ ] Incorporate PR review feedback _(auto)_
+- [ ] Final regeneration against the shipped tag _(auto -- on ship day)_
+- [ ] **Ready for Review** -- team locks the milestone and takes over _(human)_
+- [ ] **Merge** _(human)_
+<!-- release-notes-checklist:end -->
+```
+
+Rules for the checklist (critical -- get this right):
+
+- It lives **between the `<!-- release-notes-checklist:start -->` and `<!-- release-notes-checklist:end -->` markers** in the features-branch PR body. Never drop the markers, and keep exactly one checklist.
+- **Auto items** (`_(auto)_`) -- set their `[x]`/`[ ]` state from what you actually did this run (e.g. check "Open/refresh component PRs" once the component branches exist; check "Incorporate PR review feedback" only when there was feedback and you addressed it; check "Final regeneration against the shipped tag" only once `vmr_head_ref` is a finalized tag).
+- **Human items** (`_(human)_`) -- when the PR already exists, **preserve their existing `[x]`/`[ ]` state exactly** from the current PR body; when first creating the PR, leave them unchecked. **Never toggle a human item yourself.**
+- Keep the item wording stable run-to-run so states map across runs.
+
 Manifest examples (target features branch `release-notes/11.0-preview.5`):
 
 ```json
