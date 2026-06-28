@@ -102,6 +102,18 @@ When opening a ZIP archive entry for update, `ZipArchiveEntry` now validates the
 
 `System.Net.Dns` now rejects hostnames containing embedded null characters (`\0`) at the API boundary ([dotnet/runtime #128982](https://github.com/dotnet/runtime/pull/128982)). Embedded null characters can cause a hostname to be silently truncated by native string functions, potentially resolving a different host than intended. The validation throws `ArgumentException` before the name is passed to the resolver.
 
+### X25519 key agreement on Android
+
+`System.Security.Cryptography` now supports X25519 (Diffie-Hellman key exchange over Curve25519) on Android ([dotnet/runtime #129129](https://github.com/dotnet/runtime/pull/129129)). X25519 is used for key exchange in TLS 1.3, WireGuard, the Signal protocol, and many other modern cryptographic protocols. The implementation is available through `ECDiffieHellman`:
+
+```csharp
+using var ecdh = ECDiffieHellman.Create(ECCurve.CreateFromOid("1.3.101.110")); // X25519 OID
+ECDiffieHellmanPublicKey publicKey = ecdh.PublicKey;
+byte[] sharedSecret = ecdh.DeriveKeyMaterial(otherPartyPublicKey);
+```
+
+Prior to this change, `ECDiffieHellman` on Android did not support X25519, requiring workarounds or platform-specific code paths. Cross-platform apps using X25519 can now run on Android without modifications.
+
 ## In-process crash report logging
 
 When a .NET process crashes, the runtime can now write a crash report to disk from within the faulting process before the process exits ([dotnet/runtime #128105](https://github.com/dotnet/runtime/pull/128105)). Previously, crash reporting required an external child process launched via `createdump`. The new in-process path captures exception information, the faulting thread's stack, and basic process metadata without needing the external process, making crash diagnostics available in environments where spawning child processes is restricted (containers, sandboxed environments).
