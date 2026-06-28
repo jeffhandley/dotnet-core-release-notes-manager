@@ -177,6 +177,22 @@ post-steps:
             append_item "$push_item"
           fi
 
+          # Always refresh the PR body+title so the live checklist and reference
+          # codefence stay current even when no branch commits changed.
+          if [ -n "$body" ] || [ -n "$title" ]; then
+            edit_item=$(jq -cn \
+              --arg title "$title" \
+              --arg body "$body" \
+              --argjson pull_request_number "$pr_number" \
+              '{
+                type: "update_pr_body",
+                title: $title,
+                body: $body,
+                pull_request_number: $pull_request_number
+              }')
+            append_item "$edit_item"
+          fi
+
           if [ -n "$comment" ]; then
             comment_item=$(jq -cn \
               --arg body "$comment" \
@@ -501,6 +517,27 @@ jobs:
                 git push origin "refs/heads/$branch:refs/heads/$branch" --force-with-lease
                 pr_url="${repo_url}/pull/${pr_number}"
                 echo "- 🔁 \`$branch\` — pushed update to PR [#$pr_number]($pr_url)" >> "$summary"
+                ;;
+              update_pr_body)
+                # Refresh the PR body/title so the live checklist and reference
+                # codefence stay current (the body is PR metadata, not a file,
+                # so this runs even when no branch commits changed).
+                num=$(jq -r '.pull_request_number' <<<"$item")
+                ubody=$(jq -r '.body // empty' <<<"$item")
+                utitle=$(jq -r '.title // empty' <<<"$item")
+                if [ -z "$num" ] || [ "$num" = "null" ]; then
+                  echo "→ update_pr_body skipped (missing pull_request_number)"
+                else
+                  args=()
+                  if [ -n "$ubody" ]; then args+=(--body "$ubody"); fi
+                  if [ -n "$utitle" ]; then args+=(--title "$utitle"); fi
+                  if [ ${#args[@]} -gt 0 ] && gh pr edit "$num" "${args[@]}" 2>&1; then
+                    echo "→ update_pr_body refreshed PR #$num"
+                    echo "- ✏️ refreshed PR [#$num](${repo_url}/pull/$num) body" >> "$summary"
+                  else
+                    echo "::warning::Could not refresh body of PR #$num"
+                  fi
+                fi
                 ;;
               add_comment)
                 # Post the update comment on the existing PR so each automated
@@ -1075,7 +1112,7 @@ Each target produces **one manifest per branch you touched** — one for `$branc
 For each branch:
 
 - **No PR exists for this branch** → commit your changes locally on that branch, then write `/tmp/gh-aw/agent/publish/<branch_filename>.json` (replace `/` in the branch name with `-` for the filename) with `branch`, `title`, and `body`.
-- **PR already exists for this branch** → reuse that exact branch, commit the updates locally, then write or update the matching manifest with `branch` and a `comment` summarizing what changed; the workflow will reuse the existing PR and post the comment after you finish.
+- **PR already exists for this branch** → reuse that exact branch, commit any content updates locally, then write the matching manifest with `branch`, `title`, the **full refreshed `body`** (regenerate it every run so the reference codefence and the live checklist stay current — for the features branch this is the umbrella body, including the checklist with human items preserved), and a `comment` summarizing what changed. The workflow pushes branch commits (if any), **refreshes the PR body/title**, and posts the comment after you finish. For the features-branch PR you should provide `body` on **every** run even when no files changed, so the checklist/codefence refresh.
 
 Branch identity is fixed:
 

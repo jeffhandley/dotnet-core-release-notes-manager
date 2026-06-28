@@ -170,6 +170,22 @@ post-steps:
             append_item "$push_item"
           fi
 
+          # Always refresh the PR body+title so the live checklist and reference
+          # codefence stay current even when no branch commits changed.
+          if [ -n "$body" ] || [ -n "$title" ]; then
+            edit_item=$(jq -cn \
+              --arg title "$title" \
+              --arg body "$body" \
+              --argjson pull_request_number "$pr_number" \
+              '{
+                type: "update_pr_body",
+                title: $title,
+                body: $body,
+                pull_request_number: $pull_request_number
+              }')
+            append_item "$edit_item"
+          fi
+
           if [ -n "$comment" ]; then
             comment_item=$(jq -cn \
               --arg body "$comment" \
@@ -467,6 +483,27 @@ jobs:
                 pr_url="${repo_url}/pull/${pr_number}"
                 echo "- 🔁 \`$branch\` — pushed update to PR [#$pr_number]($pr_url)" >> "$summary"
                 ;;
+              update_pr_body)
+                # Refresh the PR body/title so the live checklist and reference
+                # codefence stay current (the body is PR metadata, not a file,
+                # so this runs even when no branch commits changed).
+                num=$(jq -r '.pull_request_number' <<<"$item")
+                ubody=$(jq -r '.body // empty' <<<"$item")
+                utitle=$(jq -r '.title // empty' <<<"$item")
+                if [ -z "$num" ] || [ "$num" = "null" ]; then
+                  echo "→ update_pr_body skipped (missing pull_request_number)"
+                else
+                  args=()
+                  if [ -n "$ubody" ]; then args+=(--body "$ubody"); fi
+                  if [ -n "$utitle" ]; then args+=(--title "$utitle"); fi
+                  if [ ${#args[@]} -gt 0 ] && gh pr edit "$num" "${args[@]}" 2>&1; then
+                    echo "→ update_pr_body refreshed PR #$num"
+                    echo "- ✏️ refreshed PR [#$num](${repo_url}/pull/$num) body" >> "$summary"
+                  else
+                    echo "::warning::Could not refresh body of PR #$num"
+                  fi
+                fi
+                ;;
               add_comment)
                 # Post the update comment on the existing PR so each automated
                 # update is summarized for reviewers.
@@ -592,7 +629,7 @@ Keep the structure shallow and consistent across all patches so the gate passes 
 All pending patches go on the **single consolidated branch** `target.base_branch` (e.g. `release-notes/servicing`). Commit your `.md` changes locally on that branch, then write exactly one manifest to `/tmp/gh-aw/agent/publish/<branch_filename>.json` (replace `/` with `-` in the branch name):
 
 - **No PR exists for the branch yet** → manifest with `branch`, `title`, `body`. Title: `[release-notes] Servicing — <comma-separated pending versions>`. Body: summarize which patches were drafted, how many notable fixes each, any open questions, plus the reference codefence below.
-- **A PR already exists** → manifest with `branch` and a `comment` summarizing what changed since the last run.
+- **A PR already exists** → manifest with `branch`, `title`, the **full refreshed `body`** (regenerate it every run so the reference codefence and the live checklist stay current, preserving human checklist items), and a `comment` summarizing what changed since the last run. Provide `body` on **every** run even when no `.md` files changed, so the checklist/codefence refresh.
 
 Include in the PR body a single fenced `yaml` **reference codefence** (regenerate it each run, replacing the previous one so the description never accumulates more than one):
 
