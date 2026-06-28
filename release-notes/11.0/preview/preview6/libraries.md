@@ -11,6 +11,7 @@
 - [DNS hostname null-character validation](#dns-hostname-null-character-validation)
 - [`FrozenDictionary` construction is faster](#frozendictionary-construction-is-faster)
 - [`AsnEncodedData.RawData` setter obsoleted](#asnencodeddatarawdata-setter-obsoleted)
+- [CBOR nesting depth limit (`CborReader` / `CborWriter`)](#cbor-nesting-depth-limit-cborreader--cborwriter)
 - [Bug fixes](#bug-fixes)
 - [Community contributors](#community-contributors)
 
@@ -87,6 +88,22 @@ The TAR reader now correctly handles mandatory Zip64 Extended Information extra 
 ## `AsnEncodedData.RawData` setter obsoleted
 
 The `set` accessor of `AsnEncodedData.RawData` is now marked `[Obsolete]` ([dotnet/runtime #129765](https://github.com/dotnet/runtime/pull/129765)). The setter is difficult to use correctly because it bypasses the object's internal consistency guarantees; callers should reconstruct the `AsnEncodedData` instance from the new raw bytes using the constructor instead.
+
+## CBOR nesting depth limit (`CborReader` / `CborWriter`)
+
+`CborReaderOptions` and `CborWriterOptions` gain a configurable `MaxDepth` property that limits how deeply nested a CBOR value can be during reading or writing ([dotnet/runtime #129273](https://github.com/dotnet/runtime/pull/129273)). Without a depth limit, a malicious or malformed CBOR payload with extreme nesting can exhaust the call stack.
+
+```csharp
+// Reader: default max depth is 64; set via options
+var options = new CborReaderOptions { MaxDepth = 16 };
+var reader = new CborReader(data, options);
+
+// Writer: default max depth is 1000; set via options
+var writerOptions = new CborWriterOptions { MaxDepth = 16 };
+var writer = new CborWriter(writerOptions);
+```
+
+> **Breaking change:** `CborReader` previously had no depth limit. Code that reads CBOR values nested deeper than 64 levels will now throw `CborContentException`. Set `CborReaderOptions.MaxDepth` to a higher value (or `-1` for unlimited) if your data legitimately requires deeper nesting.
 
 ## Bug fixes
 
