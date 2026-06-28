@@ -250,7 +250,7 @@ jobs:
 
   publish_release_notes:
     name: Publish release-notes branches
-    needs: [agent]
+    needs: [agent, activation]
     if: always() && needs.agent.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -267,7 +267,9 @@ jobs:
       - name: Download agent artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: agent
+          # gh-aw prefixes artifact names (non-empty in workflow_call mode) to
+          # avoid matrix collisions; match the prefix used by the agent upload.
+          name: ${{ needs.activation.outputs.artifact_prefix }}agent
           path: /tmp/gh-aw/
 
       - name: Configure git identity
