@@ -518,6 +518,8 @@ jobs:
 imports:
   - shared/pat_pool.md
 
+environment: copilot-pat-pool
+
 engine:
   id: copilot
   version: "1.0.60"
