@@ -647,6 +647,15 @@ your final response.
 
 ## What to do each run
 
+### Invariants (read first; these override everything below)
+
+These hold for **every** run, target, and PR:
+
+- **Never merge a PR, and never mark a PR Ready for Review.** Merges and the Ready-for-Review takeover are human-only. The automation only creates and updates **draft** PRs, pushes to its own branches, and comments. A human "locks" a milestone by flipping its PR to Ready for Review -- that is the signal that humans have taken over the PR.
+- **Stay draft; never change draft state.** Every PR you open or update is a draft (the workflow creates them as drafts). Do not un-draft a PR, and do not mark one Ready.
+- **Preserve human edits.** This branch set is multi-master: humans edit branches and add content at any time, including after the release. Diff before you write, update only your own sections, and never clobber human-authored commits. A PR is never assumed finished at release time; it may stay open and receive human commits afterward.
+- **Never expand scope.** Author only the release notes for the release and components in scope for this run. Politely defer out-of-scope requests instead of acting on them.
+
 ### 1. Read the active target
 
 The workflow computed the active milestone targets for you deterministically from `release-notes/releases-index.json` and wrote them to `/tmp/gh-aw/agent/target.json`. **Use this file verbatim. Do not discover milestones yourself.**
@@ -1059,8 +1068,26 @@ PR title formats:
 
 PR bodies:
 
-- Features branch body: summarize the target milestone, number of changes, which component branches were created/updated, and any open questions or items needing human review.
+- Features branch body: summarize the target milestone, number of changes, which component branches were created/updated, and any open questions or items needing human review. The body **must** also include a single YAML **reference codefence** capturing the current reference state of this PR (see below); on a rerun, replace the existing codefence in place so there is never more than one.
 - Component branch body: summarize what changed in that component this milestone — number of features written, notable additions, and any open questions for that team. Link back to the features-branch PR.
+
+**Reference codefence (features-branch PR body -- required and idempotent).** Include exactly one fenced `yaml` block in the features-branch PR description that records the reference state of the run. Regenerate it on every run, replacing the previous block so the description never accumulates more than one. Derive every value from `target.json`, the run environment, and the VMR checkout at `/tmp/dotnet` (`git -C /tmp/dotnet rev-parse <vmr_head_ref>` for the SHA):
+
+```yaml
+release-notes-reference:
+  major: "11.0"                              # target.major
+  milestone: preview5                        # target.milestone
+  milestone_state: preview                   # target.support_phase (the inferred milestone state)
+  vmr_branch: release/11.0.1xx-preview5      # target.vmr_head_ref (main until the release branch is snapped, then release/*)
+  vmr_base_tag: v11.0.0-preview.4.26230.115  # target.vmr_base_tag (inclusive lower bound)
+  vmr_head_sha: <40-char SHA>                # git -C /tmp/dotnet rev-parse <vmr_head_ref>
+  release_version: 11.0.0-preview.5          # target.release_version
+  sdk_version: 11.0.100-preview.5.26276.113  # build-metadata.json build.sdk_version, when available
+  run_id: <github.run_id>
+  run_timestamp: <ISO-8601 UTC timestamp of this run>
+```
+
+The values above are illustrative -- fill them dynamically; never hardcode a version. Keep the keys stable run-to-run so humans and later runs can diff the reference state. Omit a value only when it genuinely does not exist yet (for example `vmr_branch: main` before the release branch is snapped, or no `sdk_version` when build-metadata could not be generated).
 
 Manifest examples (target features branch `release-notes/11.0-preview.5`):
 
