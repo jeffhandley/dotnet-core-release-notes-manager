@@ -658,7 +658,9 @@ repository context into local files:
 - do **not** background clone work or use `jobs`, `wait`, `sleep`, or polling loops to watch clone progress
 - do **not** call GitHub MCP tools or safe-output tools directly in this workflow;
   your job is to prepare local edits and publish manifests, not to fetch or publish
-  through MCP
+  through MCP. In particular, **never call the `add_comment` safe-output tool** —
+  put any PR comment in the manifest `comment` field and the publish pipeline posts
+  it for you; calling `add_comment` yourself produces a duplicate comment.
 
 If `release-notes`, `/tmp/dotnet`, or the preloaded context files are absent or
 unusable, stop before making repo changes and explain the missing prerequisite in
