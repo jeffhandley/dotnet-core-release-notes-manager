@@ -3,32 +3,37 @@
 #
 # Deterministic, single-target preload for the Release Notes Producer (FEATURE
 # mode). Runs on the host before the agent (the agent's sandbox cannot reach or
-# execute the release-notes tool), so the agent consumes the pre-generated
-# changes.json / build-metadata.json instead of producing them itself.
+# execute the release-notes tool), and writes the full agent context under
+# $AGENT_DIR so the agent consumes pre-generated data instead of producing it.
 #
 # Split out of the release-notes-preload composite action (kept off the agentic
-# `steps:` block because gh-aw v0.80.9 cannot pin a local composite action).
+# `steps:` block because gh-aw v0.80.9 cannot pin a local composite action). The
+# discovery half lives in the manager (release-notes-discover.sh); this is the
+# per-target generation + context half.
 #
-# For one FEATURE target it:
-#   1. clones the dotnet/dotnet VMR (blobless) if not already present,
-#   2. resolves the base tag and the in-flight head ref (with the main->branch
-#      transition rule),
-#   3. generates changes.json and build-metadata.json into the target's gen dir,
-#   4. preloads the target's existing release-notes PR context (PR body, issue +
-#      review comments) so the agent can respect human edits and feedback.
+# Writes, for the single FEATURE target in $TARGET:
+#   $AGENT_DIR/target.json               single-element array in the shape the
+#                                        agent body reads (branch_features, the
+#                                        new release-notes/{channel}-{milestone}
+#                                        base, plus generated_* paths and refs)
+#   $AGENT_DIR/generated/<slug>/changes.json + build-metadata.json
+#   $AGENT_DIR/components.json            copy of the components source of truth
+#   $AGENT_DIR/release-notes-branches.txt snapshot of existing release-notes/*
+#   $AGENT_DIR/release-notes-prs.json + pr-comments/*  this target's PR context
 #
 # Requires `release-notes`, `git`, `gh`, and `jq` on PATH.
 #
 # Inputs (env):
-#   TARGET      required  single target object (JSON) emitted by discovery
-#   VMR_PATH    optional  VMR clone path                 (default /tmp/dotnet)
-#   AGENT_DIR   optional  agent context dir              (default /tmp/gh-aw/agent)
+#   TARGET      required  single target object (JSON) from release-notes-discover.sh
+#   VMR_PATH    optional  VMR clone path   (default /tmp/dotnet)
+#   AGENT_DIR   optional  agent context dir (default /tmp/gh-aw/agent)
 #   GH_TOKEN    required for PR-context preload
 set -euo pipefail
 
 TARGET="${TARGET:?TARGET (single target JSON) is required}"
 VMR_PATH="${VMR_PATH:-/tmp/dotnet}"
 AGENT_DIR="${AGENT_DIR:-/tmp/gh-aw/agent}"
+CONTENT_ROOT="${CONTENT_ROOT:-release-notes}"
 
 mode="$(jq -r '.mode' <<<"$TARGET")"
 if [ "$mode" != "feature" ]; then
@@ -37,12 +42,17 @@ if [ "$mode" != "feature" ]; then
 fi
 
 major="$(jq -r '.major' <<<"$TARGET")"
+milestone="$(jq -r '.milestone' <<<"$TARGET")"
+last_shipped="$(jq -r '.last_shipped' <<<"$TARGET")"
+support_phase="$(jq -r '.support_phase' <<<"$TARGET")"
+base_branch="$(jq -r '.base_branch' <<<"$TARGET")"
+content_dir="$(jq -r '.content_dir' <<<"$TARGET")"
 base_tag="$(jq -r '.vmr_base_tag' <<<"$TARGET")"
 head_ref="$(jq -r '.vmr_head_ref' <<<"$TARGET")"
 version="$(jq -r '.release_version' <<<"$TARGET")"
-base_branch="$(jq -r '.base_branch' <<<"$TARGET")"
 
-gen_dir="${AGENT_DIR}/generated/${base_branch#release-notes/}"
+slug="${base_branch#release-notes/}"
+gen_dir="${AGENT_DIR}/generated/${slug}"
 gen_changes="${gen_dir}/changes.json"
 gen_build_metadata="${gen_dir}/build-metadata.json"
 mkdir -p "$gen_dir" "$AGENT_DIR/pr-comments"
@@ -62,8 +72,6 @@ if ! git -C "$VMR_PATH" rev-parse --verify "$base_tag" >/dev/null 2>&1; then
   exit 1
 fi
 
-# head_ref is the in-flight milestone branch; pin to it once it exists, else
-# draft against main (the leading edge). Falling back to main is expected.
 head="$head_ref"
 if [ "$head" != "main" ]; then
   if git -C "$VMR_PATH" rev-parse --verify --quiet "origin/$head^{commit}" >/dev/null 2>&1; then
@@ -99,10 +107,47 @@ else
 fi
 echo "::endgroup::"
 
-# ---- 4. PR context preload -------------------------------------------------
+# ---- 4. agent target.json (single element, body-compatible shape) ----------
+# The agent body jq-reads .branch_features, .generated_changes,
+# .generated_build_metadata and reads the rest from the file. branch_features is
+# the NEW base branch name; component branches become <branch_features>-<id>.
+jq -n \
+  --arg branch_features "$base_branch" \
+  --arg content_dir "$content_dir" \
+  --arg major "$major" \
+  --arg milestone "$milestone" \
+  --arg last_shipped "$last_shipped" \
+  --arg support_phase "$support_phase" \
+  --arg vmr_base_tag "$base_tag" \
+  --arg vmr_head_ref "$head" \
+  --arg release_version "$version" \
+  --arg generated_changes "$gen_changes" \
+  --arg generated_build_metadata "$gen_build_metadata" \
+  '[{
+     branch_features: $branch_features,
+     content_dir: $content_dir,
+     major: $major,
+     milestone: $milestone,
+     last_shipped: $last_shipped,
+     support_phase: $support_phase,
+     vmr_base_tag: $vmr_base_tag,
+     vmr_head_ref: $vmr_head_ref,
+     release_version: $release_version,
+     generated_changes: $generated_changes,
+     generated_build_metadata: $generated_build_metadata
+   }]' > "$AGENT_DIR/target.json"
+
+# components source of truth, copied for the agent
+if [ -s "${CONTENT_ROOT}/components.json" ]; then
+  cp "${CONTENT_ROOT}/components.json" "$AGENT_DIR/components.json"
+else
+  echo "::warning::components source of truth not found: ${CONTENT_ROOT}/components.json" >&2
+fi
+
+# ---- 5. PR + branch context preload ----------------------------------------
+: > "$AGENT_DIR/release-notes-branches.txt"
 if [ -n "${GH_TOKEN:-}" ]; then
-  echo "::group::preload PR context for $base_branch"
-  pr_json="${AGENT_DIR}/release-notes-pr.json"
+  echo "::group::preload PR + branch context"
   gh pr list \
     --repo "$GITHUB_REPOSITORY" \
     --search "[release-notes] in:title" \
@@ -111,12 +156,12 @@ if [ -n "${GH_TOKEN:-}" ]; then
     --json number,title,body,headRefName,baseRefName,state,isDraft,url,updatedAt,author \
     > "${AGENT_DIR}/release-notes-prs.json" 2>/dev/null || echo "[]" > "${AGENT_DIR}/release-notes-prs.json"
 
-  # The PR(s) belonging to this target: base branch + its component sub-branches.
-  jq --arg base "$base_branch" \
-    '[.[] | select(.headRefName == $base or (.headRefName | startswith($base + "-")))]' \
-    "${AGENT_DIR}/release-notes-prs.json" > "$pr_json"
+  git ls-remote --heads origin 'release-notes/*' 2>/dev/null | awk '{print $2}' | while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    printf 'origin/%s\n' "${ref#refs/heads/}" >> "$AGENT_DIR/release-notes-branches.txt"
+  done
 
-  jq -r '.[] | select(.state == "OPEN") | .number' "$pr_json" | while IFS= read -r pr; do
+  jq -r '.[] | select(.state == "OPEN") | .number' "${AGENT_DIR}/release-notes-prs.json" | while IFS= read -r pr; do
     [ -n "$pr" ] || continue
     gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments?per_page=100" > "$AGENT_DIR/pr-comments/${pr}-issue-comments.json" 2>/dev/null || true
     gh api "repos/$GITHUB_REPOSITORY/pulls/$pr/comments?per_page=100"  > "$AGENT_DIR/pr-comments/${pr}-review-comments.json" 2>/dev/null || true
@@ -124,8 +169,10 @@ if [ -n "${GH_TOKEN:-}" ]; then
   done
   echo "::endgroup::"
 else
+  echo "[]" > "${AGENT_DIR}/release-notes-prs.json"
   echo "::notice::GH_TOKEN not set — skipping PR-context preload."
 fi
 
 echo "Producer preload complete for ${base_branch}:"
+jq -c '.[0] | {branch_features, vmr_base_tag, vmr_head_ref}' "$AGENT_DIR/target.json"
 find "$gen_dir" -type f 2>/dev/null | sort

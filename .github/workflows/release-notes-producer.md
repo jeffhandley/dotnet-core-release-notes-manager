@@ -24,8 +24,8 @@ safe-outputs:
     # ceiling and covers the realistic per-target branch count with headroom.
     max: 10
   push-to-pull-request-branch:
-    title-prefix: "[release-notes] "
-    labels: [area-release-notes, automation]
+    required-title-prefix: "[release-notes] "
+    required-labels: [area-release-notes, automation]
     # Matches create-pull-request: later runs push updates to the same
     # umbrella + per-component branch family.
     max: 10
@@ -54,20 +54,34 @@ timeout-minutes: 120
 
 on:
   permissions: {}
-  schedule: daily around 9am PDT
   workflow_dispatch:
     inputs:
+      target:
+        description: "Single discovery target (JSON) from release-notes-discover.sh."
+        required: true
+        type: string
       milestone:
-        description: "Optional milestone override. Use the directory name, for example preview4, rc1, or ga. Leave empty to auto-detect."
+        description: "Optional milestone override (rc1, ga) for phase-boundary transitions."
         required: false
         type: string
 
 steps:
-  - name: Preload release-notes context
-    uses: ./.github/actions/release-notes-preload
+  - name: Download release-notes tool
+    uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
     with:
-      milestone: ${{ github.event.inputs.milestone }}
-      github-token: ${{ github.token }}
+      name: release-notes-gen-tool
+      path: /tmp/release-notes-gen-tool
+  - name: Preload target context and generate
+    shell: bash
+    env:
+      TARGET: ${{ inputs.target }}
+      GH_TOKEN: ${{ github.token }}
+    run: |
+      set -euo pipefail
+      chmod +x /tmp/release-notes-gen-tool/release-notes
+      echo "/tmp/release-notes-gen-tool" >> "$GITHUB_PATH"
+      export PATH="/tmp/release-notes-gen-tool:$PATH"
+      bash .github/scripts/release-notes-producer-preload.sh
 
 post-steps:
   - name: Translate publish manifests to safe outputs
