@@ -578,6 +578,15 @@ Group the kept fixes by component/area (use `components.json` to map repos → a
 
 Write or update `<content_root>/<major>/<version>/<version>.md` with **only** this draft `## Notable Changes (draft — non-security)` block (plus a short `# .NET <version>` title line if the file is new). Do **not** fabricate the Downloads table, the `## Packages updated in this release` table, CVE entries, Docker/Visual Studio sections, or link reference definitions — those are added later. If the file already exists with human-authored content, **insert or refresh only your clearly-marked draft block** and leave everything else untouched.
 
+**Markdown discipline — the publish pipeline runs a hard `markdownlint` gate that will reject the push if the file does not lint clean.** Follow these rules exactly:
+
+- Use **real markdown headings** for every group: `###` for a component (Runtime, ASP.NET Core, …) and `####` for any sub-grouping (JIT, GC, Interop, …). **Never** use bold text (`**JIT / CodeGen**`) as a stand-in heading — that fails rule `MD036/no-emphasis-as-heading`.
+- Put a blank line **before and after** every heading, list, and blockquote (`MD022`, `MD032`, `MD031`).
+- Use exactly **one** top-level `#` heading (the title); everything else is `##`/`###`/`####` (`MD025`).
+- Do not leave the `## Notable Changes` heading immediately followed by text on the next line with no blank line.
+
+Keep the structure shallow and consistent across all patches so the gate passes on the first try.
+
 ### 3. Publication manifest
 
 All pending patches go on the **single consolidated branch** `target.base_branch` (e.g. `release-notes/servicing`). Commit your `.md` changes locally on that branch, then write exactly one manifest to `/tmp/gh-aw/agent/publish/<branch_filename>.json` (replace `/` with `-` in the branch name):
