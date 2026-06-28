@@ -50,6 +50,16 @@ on:
         description: "Optional milestone override (rc1, ga) for phase-boundary transitions."
         required: false
         type: string
+  workflow_call:
+    inputs:
+      target:
+        description: "Single discovery target (JSON) from release-notes-discover.sh."
+        required: true
+        type: string
+      milestone:
+        description: "Optional milestone override (rc1, ga) for phase-boundary transitions."
+        required: false
+        type: string
 
 steps:
   - name: Download release-notes tool

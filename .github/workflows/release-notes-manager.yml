@@ -1,10 +1,10 @@
 name: Release Notes Manager
 
-# Orchestration only: discover the in-scope release targets and dispatch one
-# Release Notes Producer run per target. Deterministic (no agent), so this is a
-# plain workflow rather than an agentic gh-aw workflow. workflow_dispatch is an
-# exception to GITHUB_TOKEN recursion-prevention, so GITHUB_TOKEN + actions:write
-# is sufficient to fan out to the producer.
+# Orchestration only: discover the in-scope release targets and produce one
+# Release Notes Producer run per FEATURE target. Deterministic discovery (no
+# agent), so this is a plain workflow. The producer is invoked as a reusable
+# workflow (workflow_call) so it runs in this run's context and inherits the
+# manager's actor, satisfying the producer's gh-aw activation role check.
 
 on:
   schedule:
@@ -36,6 +36,8 @@ jobs:
     outputs:
       targets: ${{ steps.discover.outputs.targets }}
       count: ${{ steps.discover.outputs.count }}
+      feature_targets: ${{ steps.discover.outputs.feature_targets }}
+      feature_count: ${{ steps.discover.outputs.feature_count }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +49,11 @@ jobs:
           set -euo pipefail
           targets="$(bash .github/scripts/release-notes-discover.sh)"
           count="$(jq 'length' <<<"$targets")"
-          echo "Discovered ${count} target(s):"
+          # The producer implements FEATURE targets only; servicing is skipped
+          # until its producer path exists. Fan out over feature targets only.
+          feature_targets="$(jq -c '[.[] | select(.mode == "feature")]' <<<"$targets")"
+          feature_count="$(jq 'length' <<<"$feature_targets")"
+          echo "Discovered ${count} target(s); ${feature_count} feature target(s):"
           jq '.' <<<"$targets"
           # Emit compact JSON for the dispatch matrix.
           {
@@ -55,46 +61,39 @@ jobs:
             jq -c '.' <<<"$targets"
             echo "__EOF__"
             echo "count=${count}"
+            echo "feature_targets<<__EOF__"
+            jq -c '.' <<<"$feature_targets"
+            echo "__EOF__"
+            echo "feature_count=${feature_count}"
           } >> "$GITHUB_OUTPUT"
           {
-            echo "## Discovered targets (${count})"
+            echo "## Discovered targets (${count}; ${feature_count} feature)"
             echo '```json'
             jq '.' <<<"$targets"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  dispatch:
-    name: Dispatch producer
+  produce:
+    name: Produce release notes
     needs: discover
-    if: ${{ needs.discover.outputs.count != '0' && !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    if: ${{ needs.discover.outputs.feature_count != '0' && !inputs.dry_run }}
     permissions:
-      contents: read
-      actions: write
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      packages: read
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
-        target: ${{ fromJSON(needs.discover.outputs.targets) }}
-    steps:
-      - name: Dispatch Release Notes Producer
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ toJSON(matrix.target) }}
-          MILESTONE: ${{ inputs.milestone }}
-        run: |
-          set -euo pipefail
-          mode="$(jq -r '.mode' <<<"$TARGET")"
-          label="$(jq -r '.base_branch // .mode' <<<"$TARGET")"
-          # The producer currently implements FEATURE targets only. Skip other
-          # modes (e.g. servicing) until their producer path exists, rather than
-          # dispatching a run the producer would reject.
-          if [ "$mode" != "feature" ]; then
-            echo "::notice::Skipping '${label}' (mode='${mode}'): the producer does not yet implement this mode."
-            exit 0
-          fi
-          echo "Dispatching producer for: ${label}"
-          gh workflow run release-notes-producer.lock.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "${GITHUB_REF_NAME}" \
-            -f target="$(jq -c '.' <<<"$TARGET")" \
-            ${MILESTONE:+-f milestone="$MILESTONE"}
+        target: ${{ fromJSON(needs.discover.outputs.feature_targets) }}
+    # Call the producer as a reusable workflow so it runs in this run's context
+    # and inherits the manager's (human/schedule) actor, satisfying the
+    # producer's gh-aw role check. (A GITHUB_TOKEN workflow_dispatch would run as
+    # github-actions[bot], which has no repo role and fails activation.)
+    uses: ./.github/workflows/release-notes-producer.lock.yml
+    with:
+      target: ${{ toJSON(matrix.target) }}
+      milestone: ${{ inputs.milestone }}
+    secrets: inherit
