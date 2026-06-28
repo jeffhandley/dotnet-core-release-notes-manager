@@ -391,7 +391,7 @@ You are a **markdown lint fixer**. Read `/tmp/gh-aw/agent/fixup-targets.json`. F
 
 ## Editorial constraints
 
-These rules come from `.github/skills/release-notes/references/editorial-rules.md` and apply to every edit you make:
+These rules come from `.github/skills/dotnet-release-notes/references/editorial-rules.md` and apply to every edit you make:
 
 - **Backtick code identifiers in headings.** Type names, methods, directives, namespaces, constants must be in backticks. Unticked `#:ref`, `<TItem>`, etc. break MD051. Example fix: `## File-based apps: #:ref directive` → `` ## File-based apps: `#:ref` directive ``. After retitling a heading, re-run TOC regen on the file: `( cd /tmp/toctool && node regen-toc.js "$GITHUB_WORKSPACE/<file>" )`.
 - **Every fenced code block has a language.** ` ```csharp `, ` ```bash `, ` ```json `, ` ```text `. Use `text` when nothing else fits. A bare ` ``` ` always fails MD040.

@@ -621,7 +621,7 @@ Read these files and skills for detailed guidance:
 - **component-mapping.md** — VMR paths → components → product slugs → output files
 - **format-template.md** — markdown document structure
 - **editorial-rules.md** — tone, attribution, naming conventions
-- **examples/** — curated examples from previous releases, organized by component ([README](../skills/release-notes/references/examples/README.md) has principles)
+- **examples/** — curated examples from previous releases, organized by component ([README](../skills/dotnet-release-notes/references/examples/README.md) has principles)
 
 ## Model strategy
 
@@ -797,7 +797,7 @@ gh api "repos/<org>/<repo>/commits/<full-sha>/pulls" \
   --jq '.[] | select(.merged_at != null) | .html_url'
 ```
 
-See [changes-schema.md](../skills/release-notes/references/changes-schema.md) ("Commit → PR invariant").
+See [changes-schema.md](../skills/dotnet-release-notes/references/changes-schema.md) ("Commit → PR invariant").
 
 #### a2. Stage build-metadata.json (already generated for you)
 
