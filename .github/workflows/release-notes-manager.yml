@@ -20,10 +20,12 @@ on:
         required: false
         type: boolean
         default: false
-  # Reactive: when a human submits a review on a draft release-notes PR, re-run
-  # the producer for just that milestone so feedback is incorporated promptly.
-  pull_request_review:
-    types: [submitted]
+  # Reactive: pull_request_review does NOT fire for draft PRs, and release-notes
+  # PRs stay draft until a human takes over, so react to PR comments instead.
+  # Comments the workflow posts via GITHUB_TOKEN do not re-trigger workflows, so
+  # there is no comment loop (we also ignore bot comments defensively).
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -90,7 +92,7 @@ jobs:
   produce:
     name: Produce release notes
     needs: discover
-    if: ${{ github.event_name != 'pull_request_review' && needs.discover.outputs.feature_count != '0' && !inputs.dry_run }}
+    if: ${{ github.event_name != 'issue_comment' && needs.discover.outputs.feature_count != '0' && !inputs.dry_run }}
     permissions:
       contents: write
       pull-requests: write
@@ -115,7 +117,7 @@ jobs:
   produce_servicing:
     name: Produce servicing release notes
     needs: discover
-    if: ${{ github.event_name != 'pull_request_review' && needs.discover.outputs.has_servicing == 'true' && !inputs.dry_run }}
+    if: ${{ github.event_name != 'issue_comment' && needs.discover.outputs.has_servicing == 'true' && !inputs.dry_run }}
     permissions:
       contents: write
       pull-requests: write
@@ -130,48 +132,62 @@ jobs:
       target: ${{ needs.discover.outputs.servicing_target }}
     secrets: inherit
 
-  # ---- Reactive path (pull_request_review) ----------------------------------
+  # ---- Reactive path (issue_comment on a draft release-notes PR) -------------
   reactive_resolve:
-    name: Resolve reviewed PR to a target
+    name: Resolve commented PR to a target
     needs: discover
     if: >-
-      github.event_name == 'pull_request_review' &&
-      github.event.pull_request.draft &&
-      startsWith(github.event.pull_request.title, '[release-notes]') &&
-      startsWith(github.event.pull_request.head.ref, 'release-notes/')
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.type != 'Bot'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       feature_target: ${{ steps.resolve.outputs.feature_target }}
       servicing_target: ${{ steps.resolve.outputs.servicing_target }}
     env:
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.issue.number }}
       TARGETS: ${{ needs.discover.outputs.targets }}
     steps:
-      - name: Match the reviewed PR head to an in-scope target
+      - name: Match the commented draft release-notes PR to a target
         id: resolve
         run: |
           set -euo pipefail
-          echo "Reviewed PR head branch: $HEAD_REF"
           feature_target=""
           servicing_target=""
-          if [ "$HEAD_REF" = "release-notes/servicing" ]; then
-            servicing_target="$(jq -c 'map(select(.mode == "servicing")) | .[0] // empty' <<<"$TARGETS")"
+          pr_json="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,title,isDraft,state 2>/dev/null || echo '{}')"
+          head_ref="$(jq -r '.headRefName // empty' <<<"$pr_json")"
+          title="$(jq -r '.title // empty' <<<"$pr_json")"
+          is_draft="$(jq -r '.isDraft // false' <<<"$pr_json")"
+          state="$(jq -r '.state // empty' <<<"$pr_json")"
+          echo "PR #$PR_NUMBER head=$head_ref draft=$is_draft state=$state"
+          # Only react to OPEN, DRAFT release-notes PRs (once a human marks a PR
+          # Ready for Review it is human-owned and the producer leaves it alone).
+          if [ "$state" = "OPEN" ] && [ "$is_draft" = "true" ] \
+             && [ "${title#"[release-notes]"}" != "$title" ] \
+             && [ "${head_ref#release-notes/}" != "$head_ref" ]; then
+            if [ "$head_ref" = "release-notes/servicing" ]; then
+              servicing_target="$(jq -c 'map(select(.mode == "servicing")) | .[0] // empty' <<<"$TARGETS")"
+            else
+              # The PR head is either the milestone features branch or a
+              # <features-branch>-<component> branch; match the feature target
+              # whose base_branch equals the head ref or is its prefix.
+              feature_target="$(jq -c --arg h "$head_ref" '
+                map(select(.mode == "feature"))
+                | map(select(.base_branch as $b | .base_branch == $h or ($h | startswith($b + "-"))))
+                | .[0] // empty' <<<"$TARGETS")"
+            fi
           else
-            # The PR head is either the milestone features branch or a
-            # <features-branch>-<component> branch; match the feature target whose
-            # base_branch equals the head ref or is its prefix.
-            feature_target="$(jq -c --arg h "$HEAD_REF" '
-              map(select(.mode == "feature"))
-              | map(select(.base_branch == $h or ($h | startswith(.base_branch + "-"))))
-              | .[0] // empty' <<<"$TARGETS")"
+            echo "::notice::Comment is not on an open draft release-notes PR; nothing to do."
           fi
           {
             echo "feature_target<<__EOF__"; printf '%s\n' "${feature_target:-}"; echo "__EOF__"
             echo "servicing_target<<__EOF__"; printf '%s\n' "${servicing_target:-}"; echo "__EOF__"
           } >> "$GITHUB_OUTPUT"
-          if [ -z "$feature_target" ] && [ -z "$servicing_target" ]; then
-            echo "::notice::Reviewed PR did not match an in-scope target; nothing to do."
-          fi
 
   reactive_feature:
     name: Reactive produce (feature)
