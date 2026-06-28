@@ -818,6 +818,15 @@ features branch — do not delete it and do not fabricate one.
 
 `build-metadata.json` belongs on the **features branch** alongside `changes.json` and `features.json`. The `nuget.source` and `nuget.packages` values are also what downstream API verification steps consume when checking shipped types — keep this file current.
 
+#### a3. Stage and validate the API diff (best-effort, already generated for you)
+
+During preload the workflow runs `RunApiDiff.ps1` for this milestone (previous milestone → current) and writes the markdown API-diff reports into `$content_dir/api-diff/` **when the milestone's reference packages are published on the feed**. These are **shared milestone data** and belong on the **features branch** alongside `changes.json` — never on a component branch.
+
+- If `$content_dir/api-diff/` exists in your worktree (the preload generated it this run), **stage the whole `api-diff/` tree onto the features branch**.
+- If it does **not** exist, the head milestone's ref packs are likely not published yet — **keep any existing `api-diff/` already on the features branch** (do not delete it and do not fabricate one), and mark the API-diff checklist item as not-yet-done.
+- **Validate the diff** rather than trusting it blindly: follow the **`api-diff-validation`** skill ([skill](../skills/api-diff-validation/SKILL.md)) to confirm the diffed APIs actually shipped — catching missed reverts/renames and APIs that stayed internal — cross-referencing `build-metadata.json`. Record any discrepancies as open questions in the features-branch PR body.
+- When a component `.md` describes a notable new API, you may link it to the relevant `api-diff/` report.
+
 #### b. Generate or refresh features.json
 
 Before you assign scores, do a mechanical revert audit. The goal is to catch
@@ -1049,7 +1058,7 @@ committing it to the features branch.
 Some features need content that only humans can provide — benchmark data, definitive code samples, or domain-specific context. When you identify a feature that would benefit from this:
 
 - **Benchmark data** — if a JIT or performance feature would be better told with numbers, write a placeholder section noting the optimization and what it improves, and flag in the manifest `body` or `comment` that benchmark data is still needed
-- **Code samples** — if you can't confidently generate a correct, idiomatic sample (e.g., complex API interactions, platform-specific patterns), note in the manifest that a maintainer-provided sample would improve the section. A description without a sample is better than an incorrect sample.
+- **Code samples** — if you can't confidently generate a correct, idiomatic sample (e.g., complex API interactions, platform-specific patterns), note in the manifest that a maintainer-provided sample would improve the section. A description without a sample is better than an incorrect sample. **Validate every code sample you do include**: follow the **`validate-code-samples`** skill ([skill](../skills/validate-code-samples/SKILL.md)) to compile (and where practical run) the samples against the milestone SDK before publishing. If a sample fails to build or behaves unexpectedly, fix it or downgrade it to a prose description rather than shipping a broken sample, and record what you validated in the features-branch PR body. Check the "Validate code samples" checklist item only once you have actually built the samples this run.
 - **Domain expertise** — if a feature's significance isn't clear from the PR title and diff alone, note the open question in the manifest so humans can follow up
 
 Frame these as suggestions, not demands. For example: "This JIT improvement in loop unrolling looks significant. Benchmark data showing the before/after would help tell the story."
@@ -1160,6 +1169,8 @@ Automated items are kept current by this workflow. **Human** items are owned by 
 - [x] Generate `changes.json` from the VMR _(auto)_
 - [x] Score `features.json` _(auto)_
 - [ ] Open/refresh component PRs for every noteworthy component _(auto)_
+- [ ] Generate & validate the API diff _(auto -- once the milestone ref packs publish)_
+- [ ] Validate code samples build and run _(auto)_
 - [ ] Incorporate PR review feedback _(auto)_
 - [ ] Final regeneration against the shipped tag _(auto -- on ship day)_
 - [ ] **Ready for Review** -- team locks the milestone and takes over _(human)_
