@@ -83,7 +83,15 @@ jobs:
           MILESTONE: ${{ inputs.milestone }}
         run: |
           set -euo pipefail
+          mode="$(jq -r '.mode' <<<"$TARGET")"
           label="$(jq -r '.base_branch // .mode' <<<"$TARGET")"
+          # The producer currently implements FEATURE targets only. Skip other
+          # modes (e.g. servicing) until their producer path exists, rather than
+          # dispatching a run the producer would reject.
+          if [ "$mode" != "feature" ]; then
+            echo "::notice::Skipping '${label}' (mode='${mode}'): the producer does not yet implement this mode."
+            exit 0
+          fi
           echo "Dispatching producer for: ${label}"
           gh workflow run release-notes-producer.lock.yml \
             --ref "${GITHUB_REF_NAME}" \
