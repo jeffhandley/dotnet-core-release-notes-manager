@@ -1010,6 +1010,8 @@ Check those files for all comments and review feedback since the last run:
 - **Questions** (e.g., "is this the right framing?") → answer if you can, or flag it for a human
 - **Disagreements** (e.g., "I don't think this shipped") → cross-check against `changes.json`. If the commenter is right, fix it. If unclear, explain what you found and ask for clarification in the manifest `comment`
 - **Resolved threads** → skip
+- **Conflicting feedback** → when two people's feedback contradicts, favor the reviewer with **write access**. Use each comment/review's `author_association` as the signal: `OWNER`, `MEMBER`, and `COLLABORATOR` indicate write-or-higher and take precedence over `CONTRIBUTOR` or `NONE`. Note in the manifest `comment` whose guidance you followed and why.
+- **Out-of-scope requests** → per the run invariants, do not act on feedback that expands the PR beyond authoring the in-scope release notes (for example unrelated docs, schema changes, or features not in this milestone); politely defer it in the manifest `comment`.
 
 Pay special attention to comments that are clearly addressed to the workflow or agent — for example comments that mention the automation directly, ask it to make a change, ask why it chose some wording, or point out a mistake it introduced. Do not silently consume those. If you act, include a reply summary in the manifest `comment` field. If you do not act, explain why in that same field.
 
