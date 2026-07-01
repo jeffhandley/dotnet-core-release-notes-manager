@@ -1,2 +1,3 @@
 netstandard
 mscorlib
+System.Drawing.Primitives

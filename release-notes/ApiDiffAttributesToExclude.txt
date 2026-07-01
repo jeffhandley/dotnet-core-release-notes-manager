@@ -6,3 +6,4 @@ T:System.Runtime.Versioning.SupportedOSPlatformAttribute
 T:System.Runtime.Versioning.UnsupportedOSPlatformAttribute
 T:System.Windows.Markup.ContentWrapperAttribute
 T:System.Windows.TemplatePartAttribute
+T:System.CLSCompliantAttribute
